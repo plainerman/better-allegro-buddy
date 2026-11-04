@@ -29,5 +29,6 @@ BINARY = os.environ.get('BAB_BIN') or str(COMPAT / 'ref-bab')
 def test_scenario(scenario: Scenario) -> None:
     expected = run.read_golden(scenario)
     assert expected is not None, f'no golden for {scenario.name}; run `run.py golden`'
-    problems = run.compare(expected, harness.run(scenario, BINARY))
+    actual = harness.run(scenario, BINARY)
+    problems = run.compare(expected, actual, command=run.command_of(scenario))
     assert not problems, f'bab {" ".join(scenario.argv)}\n' + ''.join(problems)

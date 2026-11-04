@@ -11,12 +11,17 @@ Compared: stdout and stderr (bytes), exit code, the fake Slurm call log (mutatin
 calls -- sbatch, scancel, scontrol update, ssh, srun -- in exact order, read-only
 calls as a multiset) and the files the scenario captures, plus the tree of T.
 Exits non-zero on any mismatch.
+
+bab may start read-only queries early and replace them by cheaper ones carrying the
+same information, and caches the Slurm client version (`_readonly_problems`,
+`_without_version_cache`); `--exact-calls` turns that off (the reference passes with it).
 """
 
 from __future__ import annotations
 
 import argparse
 import difflib
+import functools
 import json
 import os
 import re
@@ -109,6 +114,130 @@ def _diff(expected: bytes, actual: bytes, label: str) -> str:
     return out
 
 
+def _fast_keys(argv: list[str]) -> set[tuple[str, str]]:
+    """What a cheaper read-only query of bab's (src/core/fast.rs on the `rust` branch)
+    stands in for; empty for any other call."""
+    if argv == ['scontrol', '--version']:  # local, no RPC; picks the forms below
+        return {('version', '')}
+    if argv == ['scontrol', '--oneliner', '--details', 'show', 'node']:
+        return {('nodes', '')}
+    if argv[:3] == ['squeue', '--json', '--state=PD'] and len(argv) <= 4:
+        return {('job-records', '')}
+    if (
+        len(argv) == 4
+        and argv[:2] == ['squeue', '-h']
+        and argv[2].startswith('--user=')
+        and argv[3] == '--format=%i|%T|%S|%e'
+    ):
+        return {('job-times', argv[2]), ('job-times', '*')}
+    return set()
+
+
+def _replaced_key(argv: list[str]) -> tuple[str, str] | None:
+    """The `_fast_keys` entry that may replace this query of `ab`'s, if any."""
+    if argv in (
+        ['scontrol', '--json', 'show', 'nodes'],
+        ['scontrol', '--oneliner', 'show', 'node'],
+    ):
+        return ('nodes', '')
+    if argv[:4] == ['scontrol', '--json', 'show', 'job'] and len(argv) <= 5:
+        return ('job-records', '')
+    if argv[:5] == ['scontrol', '--oneliner', '--details', 'show', 'job'] and len(argv) <= 6:
+        return ('job-times', '*')
+    if (
+        len(argv) == 4
+        and argv[:2] == ['squeue', '-h']
+        and argv[2].startswith('--user=')
+        and argv[3] == '--format=%F'
+    ):
+        return ('job-times', argv[2])
+    return None
+
+
+def command_of(scenario: Scenario) -> str:
+    """The subcommand a scenario runs (`q`, `node`, ...; '' for none)."""
+    return next((arg for arg in scenario.argv if not arg.startswith('-')), '')
+
+
+@functools.cache
+def reference_queries() -> dict[str, frozenset[tuple[str, ...]]]:
+    """Per subcommand, every read-only query the reference makes in some golden."""
+    found: dict[str, set[tuple[str, ...]]] = {}
+    for scenario in SCENARIOS:
+        expected = read_golden(scenario)
+        for call in expected.calls if expected else []:
+            if not harness.is_mutating(call['argv']) and not call.get('unexpected'):
+                found.setdefault(command_of(scenario), set()).add(tuple(call['argv']))
+    return {command: frozenset(argvs) for command, argvs in found.items()}
+
+
+def _readonly_problems(
+    expected: list[dict], actual: list[dict], exact: bool, command: str | None
+) -> str:
+    """Read-only calls are compared as a multiset. Unless `exact`, bab may also (AGENTS.md
+    on the `rust` branch: read-only queries may start early or be replaced by cheaper
+    ones carrying the same information):
+      - make its cheaper forms (`_fast_keys`), and skip a query of `ab`'s only when a
+        cheaper form standing in for it succeeded in the same scenario (`_replaced_key`);
+      - prefetch: make a read-only query that the reference makes for the same
+        subcommand in some scenario, though not in this one (an earlier call failed, or
+        the data made it unnecessary: no pending job to explain, an unknown node, ...).
+    Unexpected calls (the fake fails closed) are never accepted."""
+    _, exp_ro = _split_calls(expected)
+    _, act_ro = _split_calls(actual)
+    missing, extra = exp_ro - act_ro, act_ro - exp_ro
+    if not exact:
+        made = set().union(*(_fast_keys(c['argv']) for c in actual if c.get('exit') == 0))
+        missing = Counter(
+            {
+                c: n
+                for c, n in missing.items()
+                if _replaced_key(json.loads(c)['argv']) not in made
+            }
+        )
+        prefetchable = reference_queries().get(command or '', frozenset())
+        extra = Counter(
+            {
+                c: n
+                for c, n in extra.items()
+                if json.loads(c).get('unexpected')
+                or not (
+                    _fast_keys(json.loads(c)['argv'])
+                    or tuple(json.loads(c)['argv']) in prefetchable
+                )
+            }
+        )
+    if not missing and not extra:
+        return ''
+    text = 'read-only Slurm calls (multiset' + (')' if exact else ', cheaper forms allowed)')
+    text += ':\n'
+    text += ''.join(f'  missing {n}x {c}\n' for c, n in sorted(missing.items()))
+    text += ''.join(f'  extra   {n}x {c}\n' for c, n in sorted(extra.items()))
+    return text
+
+
+def _without_version_cache(tree: bytes, expected: bytes | None) -> bytes:
+    """bab's only extra file is its Slurm client version cache,
+    <cache>/allegro-buddy/slurm-version.<host>: drop it, and the directories holding it
+    when the reference has none of them and nothing else is in them."""
+    lines = tree.splitlines(keepends=True)
+    pattern = re.compile(rb'f (.*/)?allegro-buddy/slurm-version\.[^/]+\n')
+    cache = [line for line in lines if pattern.fullmatch(line)]
+    if not cache:
+        return tree
+    wanted = set((expected or b'').splitlines(keepends=True))
+    drop = set(cache)
+    parents = {p for line in cache for p in Path(line[2:-1].decode()).parents if str(p) != '.'}
+    for parent in sorted(parents, key=lambda p: -len(p.parts)):
+        line = f'd {parent}\n'.encode()
+        inside = f'{parent}/'.encode()
+        if line not in wanted and all(
+            other in drop or not other[2:].startswith(inside) for other in lines
+        ):
+            drop.add(line)
+    return b''.join(line for line in lines if line not in drop)
+
+
 def _split_calls(calls: list[dict]) -> tuple[list[str], Counter]:
     mutating, readonly = [], Counter()
     for call in calls:
@@ -120,7 +249,12 @@ def _split_calls(calls: list[dict]) -> tuple[list[str], Counter]:
     return mutating, readonly
 
 
-def compare(expected: harness.Result, actual: harness.Result) -> list[str]:
+def compare(
+    expected: harness.Result,
+    actual: harness.Result,
+    exact_calls: bool = False,
+    command: str | None = None,
+) -> list[str]:
     """Human-readable differences; empty when the runs match."""
     problems = []
     if expected.exit_code != actual.exit_code:
@@ -128,8 +262,8 @@ def compare(expected: harness.Result, actual: harness.Result) -> list[str]:
     for label in ('stdout', 'stderr'):
         if getattr(expected, label) != getattr(actual, label):
             problems.append(_diff(getattr(expected, label), getattr(actual, label), label))
-    exp_mut, exp_ro = _split_calls(expected.calls)
-    act_mut, act_ro = _split_calls(actual.calls)
+    exp_mut, _ = _split_calls(expected.calls)
+    act_mut, _ = _split_calls(actual.calls)
     if exp_mut != act_mut:
         problems.append(
             'mutating Slurm calls (exact order):\n'
@@ -139,15 +273,13 @@ def compare(expected: harness.Result, actual: harness.Result) -> list[str]:
                 'calls.mutating',
             )
         )
-    if exp_ro != act_ro:
-        missing = exp_ro - act_ro
-        extra = act_ro - exp_ro
-        text = 'read-only Slurm calls (multiset):\n'
-        text += ''.join(f'  missing {n}x {c}\n' for c, n in sorted(missing.items()))
-        text += ''.join(f'  extra   {n}x {c}\n' for c, n in sorted(extra.items()))
-        problems.append(text)
+    readonly = _readonly_problems(expected.calls, actual.calls, exact_calls, command)
+    if readonly:
+        problems.append(readonly)
     for rel in sorted(set(expected.files) | set(actual.files)):
         exp, act = expected.files.get(rel), actual.files.get(rel)
+        if rel == '.tree' and act is not None and not exact_calls:
+            act = _without_version_cache(act, exp)
         if exp == act:
             continue
         if exp is None or act is None:
@@ -233,7 +365,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         expected = read_golden(scenario)
         if expected is None:
             return [f'no golden for {scenario.name}; run `run.py golden`\n']
-        return compare(expected, harness.run(scenario, args.bin))
+        actual = harness.run(scenario, args.bin)
+        return compare(expected, actual, args.exact_calls, command_of(scenario))
 
     results = list(zip(chosen, _parallel(one, chosen, args.jobs)))
     return _report(results, started, args.max_lines)
@@ -244,7 +377,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
     started = time.monotonic()
 
     def one(scenario: Scenario) -> list[str]:
-        return compare(harness.run(scenario, args.ref), harness.run(scenario, args.bin))
+        expected = harness.run(scenario, args.ref)
+        actual = harness.run(scenario, args.bin)
+        return compare(expected, actual, args.exact_calls, command_of(scenario))
 
     results = list(zip(chosen, _parallel(one, chosen, args.jobs)))
     return _report(results, started, args.max_lines)
@@ -269,6 +404,12 @@ def main() -> int:
         p.add_argument('--max-lines', type=int, default=80, help='diff lines per failure')
         if name in ('check', 'diff'):
             p.add_argument('--bin', required=True, help='the bab binary under test')
+            p.add_argument(
+                '--exact-calls',
+                action='store_true',
+                help="read-only calls and the file tree exactly as the reference's "
+                "(no cheaper bab query forms, no version cache; for checking ref-bab)",
+            )
         if name == 'diff':
             p.add_argument('--ref', default=str(REFERENCE), help='reference binary')
     args = parser.parse_args()

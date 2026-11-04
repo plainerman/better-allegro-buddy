@@ -80,6 +80,63 @@ def node_lines(nodes: list[dict[str, str]]) -> str:
     )
 
 
+TEXT_BASES = ['DOWN', 'IDLE', 'ALLOCATED', 'ERROR', 'MIXED', 'FUTURE', 'UNKNOWN']
+TEXT_FLAGS = [
+    'BLOCKED', 'CLOUD', 'COMPLETING', 'DRAIN', 'DYNAMIC_FUTURE', 'DYNAMIC_NORM',
+    'INVALID_REG', 'FAIL', 'MAINTENANCE', 'POWER_DOWN', 'POWER_UP', 'POWERED_DOWN',
+    'REBOOT_REQUESTED', 'REBOOT_ISSUED', 'RESERVED', 'RESUME', 'NOT_RESPONDING', 'PLANNED',
+    'POWERING_UP', 'POWERING_DOWN',
+]
+
+
+def text_state(state: str) -> str:
+    """The JSON state list (joined by +) as Slurm 24.11 scontrol prints it."""
+    base, *flags = state.split('+')
+    if base not in TEXT_BASES or any(f not in TEXT_FLAGS for f in flags):
+        return state  # not a state Slurm has; print it as given
+    return '+'.join([base, *sorted(flags, key=TEXT_FLAGS.index)])
+
+
+def node_details_lines(nodes: list[dict[str, str]]) -> str:
+    """`scontrol --oneliner --details show node` (Slurm 24.11 layout): the nodes of
+    nodes_json, for bab's cheaper query."""
+    out = []
+    for n in nodes:
+        name, cpus = n['NodeName'], n['CPUTot']
+        feats = ','.join(f for f in n['Features'].split(',') if f) or '(null)'
+        act = ','.join(f for f in n['ActiveFeatures'].split(',') if f) or '(null)'
+        gres = '(null)' if n['Gres'] in ('', '(null)') else n['Gres']
+        line = (
+            f'NodeName={name} Arch=x86_64 CoresPerSocket=1  CPUAlloc={n["CPUAlloc"]} '
+            f'CPUEfctv={cpus} CPUTot={cpus} CPULoad=0.00 AvailableFeatures={feats} '
+            f'ActiveFeatures={act} Gres={gres} '
+        )
+        if n['GresUsed']:
+            line += f'GresUsed={n["GresUsed"]} '
+        line += (
+            f'NodeAddr={name} NodeHostName={name} Version=24.11.5 OS=Linux 6.1.0 #1 SMP  '
+            f'RealMemory={n["RealMemory"]} AllocMem={n["AllocMem"]} FreeMem=N/A Sockets=1 '
+            f'Boards=1 '
+        )
+        if int(n['SpecMem']):
+            line += f'MemSpecLimit={n["SpecMem"]} '
+        line += (
+            f'State={text_state(n["State"])} ThreadsPerCore=1 TmpDisk=0 Weight=1 Owner=N/A '
+            'MCS_label=N/A '
+        )
+        parts = ','.join(p for p in n['Partitions'].split(',') if p)
+        if parts:
+            line += f'Partitions={parts}  '
+        line += (
+            'BootTime=None SlurmdStartTime=None LastBusyTime=Unknown ResumeAfterTime=None '
+            f'CfgTRES=cpu={cpus} AllocTRES= CurrentWatts=0 AveWatts=0 '
+        )
+        if n['Reservation']:
+            line += f' ReservationName={n["Reservation"]}'
+        out.append(line + '\n')
+    return ''.join(out)
+
+
 def prop_line(props: dict[str, str]) -> str:
     return ' '.join(f'{key}={value}' for key, value in props.items())
 
@@ -223,7 +280,45 @@ def record(j: dict[str, Any], state: State, clock: Clock) -> dict[str, Any]:
 SQUEUE_CODES = set('iAFujTPMLlSR')
 
 
+def squeue_json(argv: list[str], state: State, clock: Clock) -> tuple[int, str, str]:
+    """`squeue --json --state=PD (--user=U | --jobs=A,B)`: those `scontrol --json show job`
+    records, in that order."""
+    if not state.get('json_ok', True):
+        return 1, '', 'squeue: error: No data_parser plugin\n'
+    if len(argv) not in (1, 2) or argv[0] != '--state=PD':
+        raise Unexpected
+    records = state.get('records')
+    if records is None:
+        records = [record(job(raw), state, clock) for raw in state.get('jobs', [])]
+
+    def pending(r: dict[str, Any]) -> bool:
+        st = r.get('job_state') or []
+        return 'PENDING' in st
+
+    if len(argv) == 1:
+        chosen = [r for r in records if pending(r)]
+    elif argv[1].startswith('--user='):
+        user = argv[1].split('=', 1)[1]
+        chosen = [r for r in records if r.get('user_name') == user and pending(r)]
+    elif argv[1].startswith('--jobs='):
+        ids = argv[1].split('=', 1)[1].split(',')
+        chosen = [
+            r
+            for r in records
+            if pending(r)
+            and (
+                str(r.get('job_id')) in ids
+                or str((r.get('array_job_id') or {}).get('number')) in ids
+            )
+        ]
+    else:
+        raise Unexpected
+    return 0, json.dumps({'jobs': chosen}), ''
+
+
 def cmd_squeue(argv: list[str], state: State, clock: Clock) -> tuple[int, str, str]:
+    if argv[:1] == ['--json']:
+        return squeue_json(argv[1:], state, clock)
     if argv[:1] != ['-h']:
         raise Unexpected
     user = partition = name = fmt = None
@@ -247,6 +342,24 @@ def cmd_squeue(argv: list[str], state: State, clock: Clock) -> tuple[int, str, s
             raise Unexpected
     if fmt is None:
         raise Unexpected
+    if fmt == '%i|%T|%S|%e':
+        # bab's one-call form of `squeue --format=%F` + `scontrol --oneliner --details show
+        # job ID` per id (real Slurm prints both from the same job records): %i as this
+        # world's squeue prints it, JobState/StartTime/EndTime as its detail_line does
+        if user is None or partition or name is not None or pending_only:
+            raise Unexpected
+        rows = []
+        for raw in state.get('jobs', []):
+            j = job(raw)
+            if j['user'] != user:
+                continue
+            line = detail_line(j, state, clock)
+            props = dict(f.split('=', 1) for f in line.split(' ') if '=' in f)
+            rows.append('|'.join([
+                squeue_fields(j, clock)['i'], props.get('JobState', ''),
+                props.get('StartTime', ''), props.get('EndTime', ''),
+            ]) + '\n')
+        return 0, ''.join(rows), ''
     codes = [field.lstrip('%') for field in fmt.split('|')]
     if not all(len(code) == 1 and code in SQUEUE_CODES for code in codes):
         raise Unexpected
@@ -302,6 +415,8 @@ def cmd_scontrol(argv: list[str], state: State, clock: Clock) -> tuple[int, str,
         if not state.get('json_ok', True):
             return 1, '', 'scontrol: error: No data_parser plugin\n'
         return 0, nodes_json(state.get('nodes', [])), ''
+    if argv == ['--oneliner', '--details', 'show', 'node']:
+        return 0, node_details_lines(state.get('nodes', [])), ''
     if argv == ['--oneliner', 'show', 'node']:
         return 0, node_lines(state.get('nodes', [])), ''
     if argv == ['--oneliner', 'show', 'partition']:
@@ -467,8 +582,36 @@ def cmd_exec(name: str, argv: list[str], state: State) -> tuple[int, str, str]:
     )
 
 
+def slurm_version(state: State) -> str:
+    """`scontrol --version`: 24.11 (the layout this fake prints) unless the world's JSON
+    says otherwise: no data_parser plugin, or Slurm 22.05's `state_flags`."""
+    if not state.get('json_ok', True):
+        return 'slurm 20.11.9\n'
+    if any('"state_flags"' in r.get('stdout', '') for r in state.get('fail', [])):
+        return 'slurm 22.05.11\n'
+    return 'slurm 24.11.5\n'
+
+
+# bab's cheaper queries (src/core/fast.rs on the `rust` branch) -> the queries of ab's
+# whose records they print: a `fail` rule for those breaks them the same way. (Rules on
+# `scontrol --json show nodes` model broken JSON and so do not reach the text form
+# `scontrol --oneliner --details show node`; rules on all of `scontrol` do, by prefix.)
+STANDS_IN_FOR = {
+    ('squeue', '--json'): ['scontrol', '--json', 'show', 'job'],
+    ('squeue', '-h'): ['scontrol', '--oneliner', '--details', 'show', 'job'],
+}
+
+
 def answer(name: str, argv: list[str], state: State) -> tuple[int, str, str]:
-    for rule in state.get('fail', []):
+    rules = state.get('fail', [])
+    if [name, *argv] == ['scontrol', '--version']:  # local: no slurmctld, no fail rule
+        return 0, slurm_version(state), ''
+    ab_query = STANDS_IN_FOR.get((name, *argv[:1]))
+    if ab_query and (argv[:1] == ['--json'] or argv[-1:] == ['--format=%i|%T|%S|%e']):
+        for rule in rules:
+            if ab_query[: len(rule['argv'])] == rule['argv']:
+                return rule.get('exit', 1), rule.get('stdout', ''), rule.get('stderr', '')
+    for rule in rules:
         prefix = rule['argv']
         if [name, *argv][: len(prefix)] == prefix:
             return rule.get('exit', 1), rule.get('stdout', ''), rule.get('stderr', '')

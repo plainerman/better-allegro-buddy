@@ -83,7 +83,14 @@ The current user is `getpass.getuser()`: first non-empty of `LOGNAME`, `USER`, `
 State: `$FAKE_SLURM_STATE` (JSON world + mutations, under `flock`, safe for concurrent
 callers); jobs are high-level records rendered as `squeue --format` fields,
 `scontrol --oneliner --details show job` lines and `scontrol --json show job` records;
-nodes as `--json show nodes` or `--oneliner show node`. `sbatch` can add a job that turns
+nodes as `--json show nodes` or `--oneliner show node`. bab's cheaper forms of the same
+queries are answered from the same world: `scontrol --version` (24.11.5; older when the
+world's JSON is: no data_parser, 22.05 `state_flags`; never fails, it is local),
+`scontrol --oneliner --details show node` (Slurm 24.11 text of the same nodes),
+`squeue --json --state=PD [--user=U | --jobs=A,B]` (the same `scontrol --json show job`
+records, filtered) and `squeue -h --user=U --format=%i|%T|%S|%e` (%i as squeue prints it,
+JobState/StartTime/EndTime as the detail lines do); `fail` rules for the query of ab's a
+form stands in for break that form too. `sbatch` can add a job that turns
 RUNNING (or FAILED) after N status polls, `scancel` removes jobs, `scontrol update`
 applies a scripted result (`update.then` replaces records/nodes) or changes
 `MinMemoryNode` of a demo job. `ssh`/`srun` print `[fake ssh session]` and exit with
@@ -93,7 +100,20 @@ the world's code. Every invocation appends `{"argv": [...], "exit": N}` to
 
 Calls are compared as: mutating calls (`sbatch`, `scancel`, `scontrol update`, `ssh`,
 `srun`) in exact order; all other (read-only) calls as a multiset, so the Rust binary
-may run independent queries concurrently but must make the same set of calls.
+may run independent queries concurrently but must make the same set of calls, with two
+exceptions for bab's Slurm-side speedups (`run.py`, `_readonly_problems`; off with
+`--exact-calls`, which the reference passes):
+- cheaper forms: bab may make the forms above, and skip a query of ab's only if the form
+  standing in for it succeeded in that scenario (`--details show node` for
+  `--json show nodes` / `--oneliner show node`; `squeue --json` for
+  `scontrol --json show job [ID]`; `%i|%T|%S|%e` for `--format=%F` of the same user and
+  `--details show job [ID]`);
+- prefetch: an extra read-only query is fine if the reference makes it for the same
+  subcommand in some golden (it started early, then an error or the data made it
+  unnecessary).
+Unexpected calls never pass. In `.tree`, bab's version cache
+`cache/allegro-buddy/slurm-version.<host>` is ignored (and the directories holding it, if
+the reference has none of them and they hold nothing else).
 
 ## Scenario categories (846)
 
