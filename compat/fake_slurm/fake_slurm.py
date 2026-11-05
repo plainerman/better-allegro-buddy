@@ -21,6 +21,7 @@ and tests/slurm_records.py of allegro-buddy 2.7. Times are relative to the world
 import fcntl
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from typing import Any
@@ -309,6 +310,7 @@ def squeue_json(argv: list[str], state: State, clock: Clock) -> tuple[int, str, 
             and (
                 str(r.get('job_id')) in ids
                 or str((r.get('array_job_id') or {}).get('number')) in ids
+                or str((r.get('het_job_id') or {}).get('number')) in ids
             )
         ]
     else:
@@ -316,11 +318,109 @@ def squeue_json(argv: list[str], state: State, clock: Clock) -> tuple[int, str, 
     return 0, json.dumps({'jobs': chosen}), ''
 
 
+def detail_props(j: dict[str, Any], state: State, clock: Clock) -> dict[str, str]:
+    line = detail_line(j, state, clock)
+    return dict(f.split('=', 1) for f in line.split(' ') if '=' in f)
+
+
+def task_ids(spec: str) -> list[str]:
+    """An array task spec (`0-11`, `1,3,5-7:2`, `0-11%4`) as single task ids."""
+    out = []
+    for part in spec.split('%', 1)[0].split(','):
+        bounds, _, step = part.partition(':')
+        first, _, last = bounds.partition('-')
+        if last:
+            out += [str(t) for t in range(int(first), int(last) + 1, int(step or 1))]
+        else:
+            out.append(first)
+    return out
+
+
+def squeue_task_ids(j: dict[str, Any], props: dict[str, str]) -> list[str]:
+    """%i of `squeue -r` for this job record: one per array task it still holds
+    (`<ArrayJobId>_<task>`), else as squeue prints it (job id, `<HetJobId>+<offset>`)."""
+    if j.get('squeue', {}).get('i'):
+        return [j['squeue']['i']]
+    array, tasks = props.get('ArrayJobId'), props.get('ArrayTaskId')
+    if not (array and tasks):
+        match = re.fullmatch(r'(\d+)_\[([^\]]+)\]', j.get('display_id') or '')
+        if not match:
+            return [j.get('display_id') or j['id']]
+        array, tasks = match.groups()
+    return [f'{array}_{t}' for t in task_ids(tasks.strip('[]'))]
+
+
+def job_times(user: str, state: State, clock: Clock) -> str:
+    """`squeue -h -r --user=U --format=%A|%i|%T|%S|%e`, bab's one-call form of
+    `squeue --format=%F` + `scontrol --oneliner --details show job ID` per id (real Slurm
+    prints both from the same job records): %A the record's job id, one line per array
+    task of it (-r), JobState/StartTime/EndTime as its detail_line has them (an unknown
+    time is `N/A` in squeue)."""
+    rows = []
+    for raw in state.get('jobs', []):
+        j = job(raw)
+        if j['user'] != user:
+            continue
+        props = detail_props(j, state, clock)
+        times = [
+            'N/A' if props.get(key, '') in ('Unknown', 'None') else props.get(key, '')
+            for key in ('StartTime', 'EndTime')
+        ]
+        record = squeue_fields(j, clock)['A']
+        for task in squeue_task_ids(j, props):
+            rows.append('|'.join([record, task, props.get('JobState', ''), *times]) + '\n')
+    return ''.join(rows)
+
+
+def expand_hostlist(text: str) -> list[str]:
+    """`gpu[101-102],cmp201` -> its node names."""
+    names = []
+    for part in re.findall(r'[^,\[]+(?:\[[^\]]*\])?[^,]*', text):
+        match = re.fullmatch(r'([^\[]*)\[([^\]]*)\](.*)', part)
+        if not match:
+            names.append(part)
+            continue
+        prefix, ranges, suffix = match.groups()
+        for item in ranges.split(','):
+            first, _, last = item.partition('-')
+            for n in range(int(first), int(last or first) + 1):
+                names.append(f'{prefix}{n:0{len(first)}d}{suffix}')
+    return names
+
+
+def node_jobs(node: str, state: State, clock: Clock) -> tuple[int, str, str]:
+    """`squeue -h --nodelist=NODE --states=R,CG,CF --format=%i`: the jobs and array tasks
+    whose detail line has NODE in NodeList and JobState RUNNING, COMPLETING or
+    CONFIGURING, one %i each (`<ArrayJobId>_<ArrayTaskId>` for an array task)."""
+    if node not in {n['NodeName'] for n in state.get('nodes', [])}:
+        return 1, '', 'squeue: error: Invalid node name specified\n'
+    rows = []
+    for raw in state.get('jobs', []):
+        j = job(raw)
+        props = detail_props(j, state, clock)
+        if props.get('JobState') not in ('RUNNING', 'COMPLETING', 'CONFIGURING'):
+            continue
+        if node not in expand_hostlist(props.get('NodeList', '')):
+            continue
+        rows += [task + '\n' for task in squeue_task_ids(j, props)]
+    return 0, ''.join(rows), ''
+
+
 def cmd_squeue(argv: list[str], state: State, clock: Clock) -> tuple[int, str, str]:
     if argv[:1] == ['--json']:
         return squeue_json(argv[1:], state, clock)
     if argv[:1] != ['-h']:
         raise Unexpected
+    if argv[1:2] == ['-r'] and len(argv) == 4 and argv[3] == '--format=%A|%i|%T|%S|%e':
+        if not argv[2].startswith('--user='):
+            raise Unexpected
+        return 0, job_times(argv[2].split('=', 1)[1], state, clock), ''
+    if (
+        len(argv) == 4
+        and argv[1].startswith('--nodelist=')
+        and argv[2:] == ['--states=R,CG,CF', '--format=%i']
+    ):
+        return node_jobs(argv[1].split('=', 1)[1], state, clock)
     user = partition = name = fmt = None
     pending_only = False
     rest = argv[1:]
@@ -380,7 +480,10 @@ def cmd_squeue(argv: list[str], state: State, clock: Clock) -> tuple[int, str, s
 
 
 def _matches_id(raw: dict[str, Any], wanted: str) -> bool:
-    return wanted in {raw['id'], raw.get('array_job_id'), raw.get('display_id')}
+    ids = {raw['id'], raw.get('array_job_id'), raw.get('display_id')}
+    if raw.get('array_job_id') and raw.get('array_task_id'):
+        ids.add(f'{raw["array_job_id"]}_{raw["array_task_id"]}')
+    return wanted in ids
 
 
 def _advance(raw: dict[str, Any]) -> None:
@@ -596,18 +699,30 @@ def slurm_version(state: State) -> str:
 # whose records they print: a `fail` rule for those breaks them the same way. (Rules on
 # `scontrol --json show nodes` model broken JSON and so do not reach the text form
 # `scontrol --oneliner --details show node`; rules on all of `scontrol` do, by prefix.)
-STANDS_IN_FOR = {
-    ('squeue', '--json'): ['scontrol', '--json', 'show', 'job'],
-    ('squeue', '-h'): ['scontrol', '--oneliner', '--details', 'show', 'job'],
-}
+DETAILS = ['scontrol', '--oneliner', '--details', 'show', 'job']
+
+
+def stands_in_for(name: str, argv: list[str]) -> list[str] | None:
+    if name != 'squeue':
+        return None
+    if argv[:1] == ['--json']:
+        return ['scontrol', '--json', 'show', 'job']
+    if argv[:1] == ['-h'] and argv[-1:] in (
+        ['--format=%i|%T|%S|%e'],  # job times, without -r
+        ['--format=%A|%i|%T|%S|%e'],  # job times, -r
+    ):
+        return DETAILS
+    if argv[:1] == ['-h'] and argv[2:] == ['--states=R,CG,CF', '--format=%i']:
+        return DETAILS  # the jobs on a node
+    return None
 
 
 def answer(name: str, argv: list[str], state: State) -> tuple[int, str, str]:
     rules = state.get('fail', [])
     if [name, *argv] == ['scontrol', '--version']:  # local: no slurmctld, no fail rule
         return 0, slurm_version(state), ''
-    ab_query = STANDS_IN_FOR.get((name, *argv[:1]))
-    if ab_query and (argv[:1] == ['--json'] or argv[-1:] == ['--format=%i|%T|%S|%e']):
+    ab_query = stands_in_for(name, argv)
+    if ab_query:
         for rule in rules:
             if ab_query[: len(rule['argv'])] == rule['argv']:
                 return rule.get('exit', 1), rule.get('stdout', ''), rule.get('stderr', '')

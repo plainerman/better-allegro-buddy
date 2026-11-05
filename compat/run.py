@@ -130,27 +130,52 @@ def _fast_keys(argv: list[str]) -> set[tuple[str, str]]:
         and argv[3] == '--format=%i|%T|%S|%e'
     ):
         return {('job-times', argv[2]), ('job-times', '*')}
+    if (
+        len(argv) == 5
+        and argv[:3] == ['squeue', '-h', '-r']
+        and argv[3].startswith('--user=')
+        and argv[4] == '--format=%A|%i|%T|%S|%e'
+    ):
+        return {('job-times', argv[3]), ('job-times', '*')}
+    if (
+        len(argv) == 5
+        and argv[:2] == ['squeue', '-h']
+        and argv[2].startswith('--nodelist=')
+        and argv[3:] == ['--states=R,CG,CF', '--format=%i']
+    ):
+        return {('node-jobs', '')}
     return set()
 
 
-def _replaced_key(argv: list[str]) -> tuple[str, str] | None:
-    """The `_fast_keys` entry that may replace this query of `ab`'s, if any."""
+def _replaced_keys(argv: list[str]) -> set[tuple[str, str]]:
+    """The `_fast_keys` entries that may each replace this query of `ab`'s."""
     if argv in (
         ['scontrol', '--json', 'show', 'nodes'],
         ['scontrol', '--oneliner', 'show', 'node'],
     ):
-        return ('nodes', '')
+        return {('nodes', '')}
     if argv[:4] == ['scontrol', '--json', 'show', 'job'] and len(argv) <= 5:
-        return ('job-records', '')
-    if argv[:5] == ['scontrol', '--oneliner', '--details', 'show', 'job'] and len(argv) <= 6:
-        return ('job-times', '*')
+        return {('job-records', '')}
+    if argv == ['scontrol', '--oneliner', '--details', 'show', 'job']:
+        return {('job-times', '*'), ('node-jobs', '')}
+    if argv[:5] == ['scontrol', '--oneliner', '--details', 'show', 'job'] and len(argv) == 6:
+        return {('job-times', '*')}
     if (
         len(argv) == 4
         and argv[:2] == ['squeue', '-h']
         and argv[2].startswith('--user=')
         and argv[3] == '--format=%F'
     ):
-        return ('job-times', argv[2])
+        return {('job-times', argv[2])}
+    return set()
+
+
+def _follow_up_key(argv: list[str]) -> tuple[str, str] | None:
+    """The `_fast_keys` entry whose success lets bab make this query of ab's vocabulary
+    though the reference does not here: `node NODE` asks `--details show job ID` for each
+    job `squeue --nodelist=NODE` listed, instead of ab's full `--details show job`."""
+    if argv[:5] == ['scontrol', '--oneliner', '--details', 'show', 'job'] and len(argv) == 6:
+        return ('node-jobs', '')
     return None
 
 
@@ -178,7 +203,9 @@ def _readonly_problems(
     on the `rust` branch: read-only queries may start early or be replaced by cheaper
     ones carrying the same information):
       - make its cheaper forms (`_fast_keys`), and skip a query of `ab`'s only when a
-        cheaper form standing in for it succeeded in the same scenario (`_replaced_key`);
+        cheaper form standing in for it succeeded in the same scenario (`_replaced_keys`);
+      - make the per-job queries following a cheaper form that succeeded
+        (`_follow_up_key`: `node NODE`'s `--details show job ID` per job listed);
       - prefetch: make a read-only query that the reference makes for the same
         subcommand in some scenario, though not in this one (an earlier call failed, or
         the data made it unnecessary: no pending job to explain, an unknown node, ...).
@@ -192,7 +219,7 @@ def _readonly_problems(
             {
                 c: n
                 for c, n in missing.items()
-                if _replaced_key(json.loads(c)['argv']) not in made
+                if not _replaced_keys(json.loads(c)['argv']) & made
             }
         )
         prefetchable = reference_queries().get(command or '', frozenset())
@@ -204,6 +231,7 @@ def _readonly_problems(
                 or not (
                     _fast_keys(json.loads(c)['argv'])
                     or tuple(json.loads(c)['argv']) in prefetchable
+                    or _follow_up_key(json.loads(c)['argv']) in made
                 )
             }
         )

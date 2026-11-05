@@ -88,13 +88,18 @@ queries are answered from the same world: `scontrol --version` (24.11.5; older w
 world's JSON is: no data_parser, 22.05 `state_flags`; never fails, it is local),
 `scontrol --oneliner --details show node` (Slurm 24.11 text of the same nodes),
 `squeue --json --state=PD [--user=U | --jobs=A,B]` (the same `scontrol --json show job`
-records, filtered) and `squeue -h --user=U --format=%i|%T|%S|%e` (%i as squeue prints it,
-JobState/StartTime/EndTime as the detail lines do); `fail` rules for the query of ab's a
-form stands in for break that form too. `sbatch` can add a job that turns
-RUNNING (or FAILED) after N status polls, `scancel` removes jobs, `scontrol update`
-applies a scripted result (`update.then` replaces records/nodes) or changes
-`MinMemoryNode` of a demo job. `ssh`/`srun` print `[fake ssh session]` and exit with
-the world's code. Every invocation appends `{"argv": [...], "exit": N}` to
+records, filtered by job, array or het job id), `squeue -h --user=U --format=%i|%T|%S|%e`
+(%i as squeue prints it, JobState/StartTime/EndTime as the detail lines do),
+`squeue -h -r --user=U --format=%A|%i|%T|%S|%e` (the same, one line per array task a
+record holds, all with its job id as %A; an unknown time is `N/A`) and
+`squeue -h --nodelist=NODE --states=R,CG,CF --format=%i` (the jobs whose detail line has
+NODE in NodeList and JobState RUNNING/COMPLETING/CONFIGURING, array tasks as
+`<ArrayJobId>_<ArrayTaskId>`, which `--details show job ID` also answers; an unknown
+node fails); `fail` rules for the query of ab's a form stands in for break that form
+too. `sbatch` can add a job that turns RUNNING (or FAILED) after N status polls,
+`scancel` removes jobs, `scontrol update` applies a scripted result (`update.then`
+replaces records/nodes) or changes `MinMemoryNode` of a demo job. `ssh`/`srun` print
+`[fake ssh session]` and exit with the world's code. Every invocation appends `{"argv": [...], "exit": N}` to
 `$FAKE_SLURM_LOG`; anything not recognised exactly exits 1 and is logged with
 `"unexpected": true` (fail closed; goldens contain none).
 
@@ -106,8 +111,10 @@ exceptions for bab's Slurm-side speedups (`run.py`, `_readonly_problems`; off wi
 - cheaper forms: bab may make the forms above, and skip a query of ab's only if the form
   standing in for it succeeded in that scenario (`--details show node` for
   `--json show nodes` / `--oneliner show node`; `squeue --json` for
-  `scontrol --json show job [ID]`; `%i|%T|%S|%e` for `--format=%F` of the same user and
-  `--details show job [ID]`);
+  `scontrol --json show job [ID]`; `%i|%T|%S|%e` and `-r ... %A|%i|%T|%S|%e` for
+  `--format=%F` of the same user and `--details show job [ID]`; `--nodelist=NODE` for
+  `--details show job`), and after a successful `--nodelist=NODE` make
+  `--details show job ID` (one per job listed there);
 - prefetch: an extra read-only query is fine if the reference makes it for the same
   subcommand in some golden (it started early, then an error or the data made it
   unnecessary).
