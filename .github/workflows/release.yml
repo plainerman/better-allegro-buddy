@@ -1,0 +1,236 @@
+name: Release
+
+# The `bab` binary for Linux (manylinux2014: glibc >= 2.17, x86_64/aarch64) and macOS
+# (x86_64/arm64): Python wheels built by maturin (pyproject.toml), the sdist, and plain
+# binaries bab-$(uname -m)-$(uname -s).tar.gz for `curl | tar` installs (README: Install).
+# * push to main (paths below), workflow_dispatch: build and smoke-test, release nothing.
+# * tag v*: the same, then a GitHub release with every file (the newest one is what
+#   /releases/latest/download/... serves), and PyPI (trusted publishing) only if the
+#   repository variable PYPI_PUBLISH is 'true'. Path filters do not apply to tags.
+# Releasing: README.md (Development > Releasing).
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'src/**'
+      - 'presets/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - 'README.md'
+      - 'LICENSE'
+      - '.github/pypi-readme.py'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same maturin for every artifact; pyproject.toml accepts >=1.9.2,<2.
+  MATURIN_VERSION: v1.16.0
+
+jobs:
+  build:
+    # Linux: glibc (manylinux2014 = glibc 2.17), not musl, because group names come from
+    # NSS (getgrgid_r), on clusters often sssd/LDAP. Native runners everywhere, so every
+    # binary is smoke-tested on its own architecture. `asset` is `uname -m`-`uname -s`.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64, runner: ubuntu-24.04, manylinux: '2014', asset: x86_64-Linux }
+          - { target: aarch64, runner: ubuntu-24.04-arm, manylinux: '2014', asset: aarch64-Linux }
+          - { target: x86_64, runner: macos-15-intel, manylinux: '', asset: x86_64-Darwin }
+          - { target: aarch64, runner: macos-15, manylinux: '', asset: arm64-Darwin }
+    name: build (${{ matrix.asset }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: README with absolute image and link URLs for PyPI
+        run: python3 .github/pypi-readme.py
+      - uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: false
+      - name: Smoke test the wheel
+        run: |
+          wheel=$(ls dist/*.whl)
+          uvx --from "$wheel" bab -h > /dev/null
+          uvx --from "$wheel" bab --version | grep -x 'bab, version [0-9.]*'
+      - name: Standalone binary bab-${{ matrix.asset }}.tar.gz
+        run: |
+          mkdir -p bin
+          unzip -o -j dist/*.whl '*.data/scripts/bab' -d bin
+          chmod 755 bin/bab
+          test "$(uname -m)-$(uname -s)" = "${{ matrix.asset }}"
+          bin/bab --version
+          file bin/bab
+          tar -czf bab-${{ matrix.asset }}.tar.gz -C bin bab
+      - name: Linux binary needs only glibc <= 2.17 symbols and runs on glibc 2.17
+        if: runner.os == 'Linux'
+        run: |
+          newest=$(objdump -T bin/bab | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -n 1)
+          echo "newest glibc symbol version: $newest"
+          if [ "$(printf '%s\n' "$newest" GLIBC_2.17 | sort -V | tail -n 1)" != GLIBC_2.17 ]; then
+            echo "::error::bab needs $newest, newer than manylinux2014's GLIBC_2.17"
+            exit 1
+          fi
+          docker run --rm -v "$PWD/bin:/b:ro" quay.io/pypa/manylinux2014_${{ matrix.target }} \
+            sh -c 'ldd --version | head -n 1; /b/bab --version'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.asset }}
+          path: dist/*.whl
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.asset }}
+          path: bab-${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  sdist:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches the Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+      - name: README with absolute image and link URLs for PyPI
+        run: python3 .github/pypi-readme.py
+      - uses: PyO3/maturin-action@v1
+        with:
+          maturin-version: ${{ env.MATURIN_VERSION }}
+          command: sdist
+          args: --out dist
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: false
+      - name: The sdist builds a working wheel (cargo + maturin from PyPI)
+        run: |
+          uv build --wheel --out-dir sdist-wheel dist/*.tar.gz
+          uvx --from "$(ls sdist-wheel/*.whl)" bab --version
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  check:
+    # Metadata and README rendering of everything that goes to PyPI.
+    needs: [build, sdist]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+          path: dist
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: false
+      - run: ls -l dist
+      - run: uvx twine check --strict dist/*
+
+  github-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create the release (latest, not a draft or prerelease)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A re-run (e.g. to publish to PyPI after enabling it) keeps the existing release.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists, leaving it as it is"
+            exit 0
+          fi
+          cd assets
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          cat > ../notes.md <<'NOTES'
+          Install the `bab` binary (Linux x86_64/aarch64 with glibc ≥ 2.17, macOS x86_64/arm64):
+
+          ```bash
+          mkdir -p ~/.local/bin && curl -fsSL "https://github.com/plainerman/better-allegro-buddy/releases/latest/download/bab-$(uname -m)-$(uname -s).tar.gz" | tar -xz -C ~/.local/bin
+          ```
+
+          The wheels and the sdist are the files of the PyPI package `better-allegro-buddy`.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" * \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --notes-file ../notes.md --generate-notes --latest --verify-tag
+
+  release-smoke-test:
+    # The README one-liner against the release just created, on every platform.
+    needs: [github-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - name: curl | tar into an empty bin directory, then run it
+        run: |
+          bin="$RUNNER_TEMP/release-bin"
+          mkdir -p "$bin"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/bab-$(uname -m)-$(uname -s).tar.gz" | tar -xz -C "$bin"
+          ls -l "$bin"
+          "$bin/bab" --version
+          "$bin/bab" -h > /dev/null
+
+  publish:
+    # PyPI only once trusted publishing is configured (README: Releasing) and the
+    # repository variable PYPI_PUBLISH is set to 'true'.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.PYPI_PUBLISH == 'true'
+    needs: [check]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/better-allegro-buddy/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: sdist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

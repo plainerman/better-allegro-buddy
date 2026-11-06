@@ -1,0 +1,25 @@
+                                                                                                    
+  Usage: bab [OPTIONS] COMMAND [ARGS]...                                                            
+                                                                                                    
+  Allegro Buddy: a friendly Slurm helper.                                                           
+                                                                                                    
+  Options                                                                                           
+  ────────────────────────────────────────────────────────────────────────────────────────────────  
+       --version   Show the version and exit.                                                       
+  -h   --help      Show this message and exit.                                                      
+                                                                                                    
+                                                                                                    
+  Commands                                                                                          
+  ────────────────────────────────────────────────────────────────────────────────────────────────  
+  completion         generate or install shell completion                                           
+  config             show where settings come from                                                  
+  dev                start, join and stop a dev job                                                 
+  l                  join a running dev job (short for bab dev login)                               
+  free               show free GPUs and cluster resources                                           
+  info               show your partitions and a cluster summary                                     
+  job                show finished jobs and their output                                            
+  node               show which jobs use a node's GPUs, CPUs and memory                             
+  queue, q           show your jobs in the queue                                                    
+  why                explain what a pending job is waiting for                                      
+                                                                                                    
+                                                                                                    

@@ -1,2 +1,0 @@
-Submitted dev job 70140 on gpu (1 GPU, 2 CPUs, 8G, 8h)
-ⓘ `ab l --wait` joins it once it runs (short for `ab dev login --wait`)

@@ -1,0 +1,1 @@
+JobId=70130 JobName=preprocess UserId=bob(1001) JobState=RUNNING Reason=None SubmitTime=2026-11-03T09:40:00 StartTime=2026-11-03T09:45:00 EndTime=2026-11-03T11:45:00 Partition=small NodeList=cmp201 NumCPUs=8 MinMemoryNode=32G Nodes=cmp201 CPU_IDs=0-7 Mem=32768 StdErr=/home/bob/slurm-70130.out StdOut=/home/bob/slurm-70130.out

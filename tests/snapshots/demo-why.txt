@@ -1,0 +1,10 @@
+70120  gpu  4x A5000 · 16 CPU · 40G
+  waiting for GPUs and CPUs to free up · starts in 2h10m (Tue 12:10) on gpu101
+  no single change starts it now
+70121  gpusmall  1x GTX1080 · 2 CPU · 8G
+  waiting for GPUs and CPUs to free up
+  no single change starts it now
+70122  gpu  2x A5000 · 8 CPU · 80G
+  waiting for memory to free up
+  starts now with --mem 80G → 73G
+  ⓘ `bab why 70122 --fix` changes the job so it starts now

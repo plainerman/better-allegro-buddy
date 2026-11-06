@@ -1,0 +1,8 @@
+                                                Queue                                                
+JobID   Name          State     Partition   Elapsed   Time left   Start      Node/Reason             
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+70110   ab-dev        RUNNING   gpu           1h25m       6h35m              gpu101                  
+70120   train-large   PENDING   gpu                          1d   in 2h10m   GPU-bound · max 3/4 free
+70121   eval-1080     PENDING   gpusmall                     4h   -          GPU-bound · max 0/1 free
+70122   finetune-xl   PENDING   gpu                         12h   -          starts now w/ mem ≤ 73G 
+ⓘ `bab why` shows what is short and what would start now

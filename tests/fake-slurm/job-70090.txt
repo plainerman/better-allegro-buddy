@@ -1,0 +1,1 @@
+JobId=70090 JobName=prep-data UserId=alice(1000) JobState=COMPLETED Reason=None SubmitTime=2026-11-03T09:55:00 StartTime=Unknown EndTime=Unknown Partition=small NodeList=cmp201 NumCPUs=4 MinMemoryNode=8G StdErr=@TMP@/demo/slurm-70090.out StdOut=@TMP@/demo/slurm-70090.out

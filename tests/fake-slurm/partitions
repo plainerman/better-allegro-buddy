@@ -1,0 +1,8 @@
+PartitionName=gpumicro AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=01:00:00 State=UP
+PartitionName=gpushort AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=04:00:00 State=UP
+PartitionName=gpusmall AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=1-00:00:00 State=UP
+PartitionName=gpu AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=2-00:00:00 State=UP
+PartitionName=micro AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=01:00:00 State=UP
+PartitionName=small AllowGroups=ALL AllowAccounts=ALL Default=YES MaxTime=2-02:00:00 State=UP
+PartitionName=amd AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=2-00:00:00 State=UP
+PartitionName=big AllowGroups=ALL AllowAccounts=ALL Default=NO MaxTime=7-00:00:00 State=UP

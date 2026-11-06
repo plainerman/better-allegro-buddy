@@ -1,0 +1,62 @@
+[package]
+name = "better-allegro-buddy"
+version = "2.7.1"
+edition = "2024"
+rust-version = "1.88"
+description = "A friendly Slurm helper (Rust rewrite of allegro-buddy), with presets for the Allegro cluster."
+license = "MIT"
+repository = "https://github.com/plainerman/better-allegro-buddy"
+readme = "README.md"
+publish = false
+# What a source package (`maturin sdist` for PyPI, `cargo package`) contains: only what
+# builds the binary. tests/, bench/, tools/, .github/ stay in the repository.
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/pyproject.toml",
+    "/presets/*.ini",
+    "/src/**/*.rs",
+]
+
+[[bin]]
+name = "bab"
+path = "src/main.rs"
+
+[lib]
+name = "bab"
+path = "src/lib.rs"
+
+# Kept minimal on purpose (startup time + binary size); justify any addition here.
+[dependencies]
+# Local wall clock, naive datetimes and strftime (%a/%b/%H:%M) like Python's datetime.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# getgroups/getgrgid_r/getpwuid_r (NSS), isatty, ioctl(TIOCGWINSZ), signals, execvp.
+libc = "0.2.191"
+# Ports of the Python regexes (GRES parsing, prop lines, Rich markup/highlighter).
+regex = "1.13.1"
+# Rich's ReprHighlighter regexes need lookbehind (Python `re` semantics).
+fancy-regex = { version = "0.20.0", default-features = false, features = ["unicode", "perf"] }
+# `scontrol --json` output; untyped Value access only, so no serde derive.
+serde_json = "1.0.154"
+# serde_json's trait crate (already in the tree): a hand-written visitor parses job records
+# without the ~100 keys per job bab never reads (`core::jobs::job_records_json`).
+serde_core = "1.0.229"
+
+[features]
+# The BAB_TEST_* environment hooks (frozen clock, groups, hostname, interactive stdin) for
+# tests/snapshots.rs. Off by default: a normal build never reads these variables.
+# `cargo test` turns it on via the dev-dependency below.
+test-hooks = []
+
+[dev-dependencies]
+# Self-reference so integration tests get a `bab` binary with the test hooks.
+better-allegro-buddy = { path = ".", features = ["test-hooks"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

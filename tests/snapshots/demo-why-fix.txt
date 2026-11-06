@@ -1,0 +1,4 @@
+70122  gpu  2x A5000 · 8 CPU · 80G
+  waiting for memory to free up
+  starts now with --mem 80G → 73G
+ⓘ `bab why 70122 --fix` changes the job so it starts now

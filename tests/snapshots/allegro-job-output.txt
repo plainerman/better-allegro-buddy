@@ -1,7 +1,0 @@
-~/slurm-70090.out
-loading shards 0-63 from /scratch/alice/corpus
-shard 16/64 done (1.2M rows)
-shard 32/64 done (2.5M rows)
-shard 48/64 done (3.7M rows)
-shard 64/64 done (5.0M rows)
-wrote /scratch/alice/corpus/clean.parquet (5.0M rows, 1.8G)

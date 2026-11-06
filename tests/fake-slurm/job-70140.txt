@@ -1,0 +1,1 @@
+JobId=70140 JobName=ab-dev UserId=alice(1000) JobState=PENDING Reason=Priority SubmitTime=2026-11-03T09:55:00 StartTime=Unknown EndTime=Unknown Partition=gpu NodeList=(null) NumCPUs=2 MinMemoryNode=8G TresPerNode=gres/gpu:1 JOB_GRES=gpu:1 StdErr=/home/alice/slurm-70140.out StdOut=/home/alice/slurm-70140.out

@@ -1,0 +1,4 @@
+70110|70110|alice|ab-dev|RUNNING|gpu|1:25:00|6:35:00|2026-11-03T08:35:00|gpu101
+70120|70120|alice|train-large|PENDING|gpu|0:00|1-00:00:00|2026-11-03T12:10:00|(Resources)
+70121|70121|alice|eval-1080|PENDING|gpusmall|0:00|4:00:00|N/A|(Priority)
+70122|70122|alice|finetune-xl|PENDING|gpu|0:00|12:00:00|N/A|(Resources)

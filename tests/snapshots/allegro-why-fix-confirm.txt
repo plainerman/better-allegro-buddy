@@ -1,5 +1,0 @@
---mem 80G → 73G starts 70122 now. This runs:
-  $ scontrol update JobId=70122 MinMemoryNode=74752
-Only the allocation changes, not the job script.
-Apply? [y/N]: n
-Left unchanged.

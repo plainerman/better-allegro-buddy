@@ -1,25 +1,30 @@
 name: CI
 
+# Only main and pull requests into main (the required checks rust/msrv/macos protect
+# main). The paths lists must cover everything the jobs below depend on (sources, tests
+# and their fixtures, presets, manifests, this file); docs-only changes (README, bench/,
+# AGENTS.md, ...) and tools/ (generators whose output is committed under src/) skip CI.
 on:
   push:
     branches: [main]
     paths:
       - 'src/**'
       - 'tests/**'
+      - 'presets/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'pyproject.toml'
-      - 'uv.lock'
-      - 'scripts/**'
-      - '.gitattributes'
       - '.github/workflows/ci.yml'
   pull_request:
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'src/**'
       - 'tests/**'
+      - 'presets/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - 'pyproject.toml'
-      - 'uv.lock'
-      - 'scripts/**'
-      - '.gitattributes'
       - '.github/workflows/ci.yml'
 
 # A new push to the same branch/PR cancels the run still in progress.
@@ -30,23 +35,48 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  test:
-    # Draft PRs get no CI; run the checks locally before marking a PR ready.
-    if: github.event.pull_request.draft != true
+  rust:
+    # Draft PRs get no CI (ready_for_review starts it); run the checks locally meanwhile.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        # Oldest supported and newest only; versions in between add cost, not coverage.
-        python: ['3.10', '3.13']
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: ${{ matrix.python }}
-          enable-cache: true
-      - run: uv sync --locked
-      - if: matrix.python == '3.10'
-        run: uv run ruff check .
-      - run: uv run pytest -q
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo clippy --all-targets --locked --features test-hooks -- -D warnings
+      - run: cargo test --locked
+  msrv:
+    # The oldest Rust that builds bab (Cargo.toml `rust-version`, README): let-chains need
+    # 1.88. --locked proves the pinned dependencies build with it too.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --all-targets --features test-hooks
+  macos:
+    # The release wheels include macOS (pyproject.toml, release.yml): the kqueue/pipe
+    # fallbacks of src/signals.rs and src/core/slurm.rs (no pidfd/pipe2 there), tested
+    # on Apple silicon.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --locked --features test-hooks -- -D warnings
+      - run: cargo test --locked --no-fail-fast

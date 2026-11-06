@@ -1,60 +1,41 @@
+# Python packaging for PyPI: maturin puts the `bab` binary into platform wheels
+# (`bindings = "bin"`), no Python code. The version comes from Cargo.toml. Releasing: README.
+[build-system]
+requires = ["maturin>=1.9.2,<2"]  # 1.9.2: PEP 639 `license`/`license-files`
+build-backend = "maturin"
+
 [project]
-name = "allegro-buddy"
-version = "2.7"
-description = "A friendly Slurm helper, with presets for the Allegro cluster."
+name = "better-allegro-buddy"
+dynamic = ["version"]
+description = "A friendly Slurm helper: allegro-buddy rewritten in Rust (the `bab` command), byte-for-byte compatible and several times faster."
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = [
-    "click>=8.1.7",
-    "rich>=13.0.0",
-    "rich-click>=1.9",
+requires-python = ">=3.8"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Grutschus" }, { name = "Michael Plainer" }]
+maintainers = [{ name = "Michael Plainer" }]
+keywords = ["slurm", "hpc", "cluster", "gpu", "cli", "allegro", "sbatch", "squeue"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: System Administrators",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Topic :: System :: Clustering",
+    "Topic :: System :: Distributed Computing",
+    "Topic :: Utilities",
 ]
-authors = [{ name = "Grutschus" }]
-license = { text = "MIT" }
 
 [project.urls]
-Source = "https://github.com/Grutschus/allegro-buddy"
+Homepage = "https://github.com/plainerman/better-allegro-buddy"
+Repository = "https://github.com/plainerman/better-allegro-buddy"
+Issues = "https://github.com/plainerman/better-allegro-buddy/issues"
+Original = "https://github.com/Grutschus/allegro-buddy"
 
-[project.scripts]
-ab = "allegro_buddy.cli:main"
-allegro-buddy = "allegro_buddy.cli:main"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[dependency-groups]
-dev = ["pre-commit>=4.0.1", "ruff>=0.6.9", "ty>=0.0.34", "pytest>=8.0", "pytest-mock>=3.14", "pytest-cov>=5.0"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-v"
-markers = [
-    "cluster: requires a running Slurm cluster (pass --cluster to enable)",
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/allegro_buddy"]
-
-[tool.ruff]
-line-length = 90
-target-version = "py310"
-
-[tool.ruff.format]
-quote-style = "single"
-line-ending = "lf"
-indent-style = "space"
-
-[tool.ruff.lint]
-extend-select = ["B", "C4", "COM", "I", "RET", "RUF", "SIM", "TC", "UP"]
-ignore = ["COM812"]
-
-[tool.ty.environment]
-python-version = "3.10"
-
-[tool.ty.src]
-# scripts/ is private tooling that imports tests via sys.path
-exclude = ["scripts"]
-
-[tool.uv]
-default-groups = ["dev"]
+[tool.maturin]
+bindings = "bin"
+# The sdist holds only what builds the binary (Cargo.toml `include`): no compat/, bench/,
+# tests/, tools/ or .github/.

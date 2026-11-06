@@ -1,6 +1,0 @@
-                               Dev jobs                                
-JobID   State     Partition   Node     CPUs   Memory   GPUs   Time left
-───────────────────────────────────────────────────────────────────────
-70110   RUNNING   gpu         gpu101      4      16G      1   6h35m    
-ⓘ `ab l` opens a shell in it (short for `ab dev login`)
-ⓘ it joins with ssh; --srun keeps the job's Slurm environment (CUDA_VISIBLE_DEVICES)

@@ -1,0 +1,223 @@
+{
+ "jobs": [
+  {
+   "job_id": 70120,
+   "array_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_id": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_string": "",
+   "user_name": "alice",
+   "job_state": [
+    "PENDING"
+   ],
+   "state_reason": "Resources",
+   "partition": "gpu",
+   "node_count": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tasks": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "cpus": {
+    "set": true,
+    "infinite": false,
+    "number": 16
+   },
+   "minimum_cpus_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tres_per_node": "gres/gpu:RTX-A5000:4",
+   "tres_per_job": "",
+   "tres_per_task": "",
+   "cpus_per_tres": "",
+   "memory_per_tres": "",
+   "memory_per_cpu": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "memory_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 40960
+   },
+   "tres_req_str": "cpu=16,mem=40960M,node=1,billing=16",
+   "features": "",
+   "excluded_nodes": "",
+   "required_nodes": "",
+   "resv_name": "",
+   "shared": [],
+   "het_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "scheduled_nodes": "gpu101",
+   "start_time": {
+    "set": true,
+    "infinite": false,
+    "number": 1793707800
+   },
+   "name": "train-large"
+  },
+  {
+   "job_id": 70121,
+   "array_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_id": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_string": "",
+   "user_name": "alice",
+   "job_state": [
+    "PENDING"
+   ],
+   "state_reason": "Priority",
+   "partition": "gpusmall",
+   "node_count": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tasks": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "cpus": {
+    "set": true,
+    "infinite": false,
+    "number": 2
+   },
+   "minimum_cpus_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tres_per_node": "gres/gpu:GTX-1080ti:1",
+   "tres_per_job": "",
+   "tres_per_task": "",
+   "cpus_per_tres": "",
+   "memory_per_tres": "",
+   "memory_per_cpu": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "memory_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 8192
+   },
+   "tres_req_str": "cpu=2,mem=8192M,node=1,billing=2",
+   "features": "",
+   "excluded_nodes": "",
+   "required_nodes": "",
+   "resv_name": "",
+   "shared": [],
+   "het_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "scheduled_nodes": "",
+   "start_time": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "name": "eval-1080"
+  },
+  {
+   "job_id": 70122,
+   "array_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_id": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "array_task_string": "",
+   "user_name": "alice",
+   "job_state": [
+    "PENDING"
+   ],
+   "state_reason": "Resources",
+   "partition": "gpu",
+   "node_count": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tasks": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "cpus": {
+    "set": true,
+    "infinite": false,
+    "number": 8
+   },
+   "minimum_cpus_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 1
+   },
+   "tres_per_node": "gres/gpu:RTX-A5000:2",
+   "tres_per_job": "",
+   "tres_per_task": "",
+   "cpus_per_tres": "",
+   "memory_per_tres": "",
+   "memory_per_cpu": {
+    "set": false,
+    "infinite": false,
+    "number": 0
+   },
+   "memory_per_node": {
+    "set": true,
+    "infinite": false,
+    "number": 81920
+   },
+   "tres_req_str": "cpu=8,mem=81920M,node=1,billing=8",
+   "features": "",
+   "excluded_nodes": "",
+   "required_nodes": "",
+   "resv_name": "",
+   "shared": [],
+   "het_job_id": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "scheduled_nodes": "",
+   "start_time": {
+    "set": true,
+    "infinite": false,
+    "number": 0
+   },
+   "name": "finetune-xl"
+  }
+ ]
+}
