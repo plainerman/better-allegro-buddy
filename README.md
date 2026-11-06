@@ -42,15 +42,6 @@ not). The macOS binary isn't signed, but files fetched with `curl` aren't quaran
 it just runs. On Linux `bab` links glibc dynamically on purpose: group lookups through
 sssd/LDAP work as they do for `ab`. All files: [releases](https://github.com/plainerman/better-allegro-buddy/releases).
 
-From PyPI, where the package is called `better-allegro-buddy` (the name `bab` was taken),
-with the same binary inside:
-
-```bash
-uv tool install better-allegro-buddy   # or: pipx install better-allegro-buddy
-uv tool upgrade better-allegro-buddy   # later
-uvx --from better-allegro-buddy bab q  # or just try it without installing
-```
-
 `ab` and `bab` happily live side by side.
 
 From source, with Rust ≥ 1.88 (e.g. via [rustup](https://rustup.rs)):
